@@ -16,6 +16,7 @@ import (
 	"github.com/cilium/cilium/api/v1/flow"
 	hubblev1 "github.com/cilium/cilium/pkg/hubble/api/v1"
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/microsoft/retina/internal/ktime"
 	kcfg "github.com/microsoft/retina/pkg/config"
@@ -177,10 +178,35 @@ func (dr *dropReason) Init() error {
 	}
 
 	progsKprobe, progsKprobeRet := buildKprobePrograms(objs)
-	progsFexit := buildFexitPrograms(objs)
+	progsFexit, acceptKprobe, acceptKretprobe := buildFexitPrograms(objs)
 
 	if supportsFexit {
 		err = dr.attachFexitPrograms(progsFexit)
+		if err != nil {
+			return err
+		}
+		// Attach kprobe/kretprobe for inet_csk_accept alongside fexit programs.
+		// The fexit inet_csk_accept_fexit is a no-op on pre-6.10 kernels (BPF verifier
+		// rejects reading the err pointer from ctx). The kretprobe path correctly reads
+		// the error via bpf_probe_read_kernel and filters EAGAIN.
+		if acceptKprobe != nil {
+			kLink, kErr := link.Kprobe(inetCskAcceptFn, acceptKprobe, nil)
+			if kErr != nil {
+				dr.l.Error("Failed to attach kprobe for inet_csk_accept", zap.Error(kErr))
+			} else {
+				dr.hooks = append(dr.hooks, kLink)
+				dr.l.Info("Attached kprobe", zap.String("program", inetCskAcceptFn))
+			}
+		}
+		if acceptKretprobe != nil {
+			krLink, krErr := link.Kretprobe(inetCskAcceptFn, acceptKretprobe, nil)
+			if krErr != nil {
+				dr.l.Error("Failed to attach kretprobe for inet_csk_accept", zap.Error(krErr))
+			} else {
+				dr.hooks = append(dr.hooks, krLink)
+				dr.l.Info("Attached kretprobe", zap.String("program", inetCskAcceptFn))
+			}
+		}
 	} else {
 		err = dr.attachKprobes(progsKprobe, progsKprobeRet)
 	}

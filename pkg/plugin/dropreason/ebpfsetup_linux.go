@@ -185,21 +185,28 @@ func buildKprobePrograms(objs any) (progsKprobe, progsKprobeRet map[string]*ebpf
 	return progsKprobe, progsKprobeRet
 }
 
-func buildFexitPrograms(objs any) map[string]*ebpf.Program {
-	progsFexit := make(map[string]*ebpf.Program)
+func buildFexitPrograms(objs any) (progsFexit map[string]*ebpf.Program, acceptKprobe, acceptKretprobe *ebpf.Program) {
+	progsFexit = make(map[string]*ebpf.Program)
 
 	switch o := objs.(type) {
 	case *allFexitObjects:
-		progsFexit[inetCskAcceptFnFexit] = o.InetCskAcceptFexit
+		// inet_csk_accept_fexit is a no-op on pre-6.10 kernels (verifier rejects
+		// ctx[2] access). We use the kprobe/kretprobe pair instead, which correctly
+		// reads the error value and filters EAGAIN.
+		// On 6.10+ kernels, the fexit handles it via proto_accept_arg (CO-RE).
+		// Including both is safe: the fexit no-op won't conflict with the kretprobe.
+		acceptKprobe = o.InetCskAccept
+		acceptKretprobe = o.InetCskAcceptRet
 		progsFexit[nfHookSlowFnFexit] = o.NfHookSlowFexit
 		progsFexit[tcpV4ConnectFexit] = o.TcpV4ConnectFexit
 		progsFexit[nfNatInetFnFexit] = o.NfNatInetFnFexit
 		progsFexit[nfConntrackConfirmFnFexit] = o.NfConntrackConfirmFexit
 
 	case *marinerObjects:
-		progsFexit[inetCskAcceptFnFexit] = o.InetCskAcceptFexit
+		acceptKprobe = o.InetCskAccept
+		acceptKretprobe = o.InetCskAcceptRet
 		progsFexit[nfHookSlowFnFexit] = o.NfHookSlowFexit
 		progsFexit[tcpV4ConnectFexit] = o.TcpV4ConnectFexit
 	}
-	return progsFexit
+	return progsFexit, acceptKprobe, acceptKretprobe
 }

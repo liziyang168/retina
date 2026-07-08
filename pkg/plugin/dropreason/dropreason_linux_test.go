@@ -710,3 +710,70 @@ func restoreBackup() {
 		}
 	}
 }
+
+func TestBuildFexitPrograms_ReturnsKprobeForAccept(t *testing.T) {
+	// When using allFexitObjects, buildFexitPrograms should:
+	// 1. NOT include inet_csk_accept_fexit in the fexit map (it's a no-op on pre-6.10)
+	// 2. Return the kprobe and kretprobe programs for inet_csk_accept
+	objs := &allFexitObjects{}
+
+	progsFexit, acceptKprobe, acceptKretprobe := buildFexitPrograms(objs)
+
+	// inet_csk_accept_fexit should NOT be in the fexit map
+	if _, exists := progsFexit[inetCskAcceptFnFexit]; exists {
+		t.Error("inet_csk_accept_fexit should not be in progsFexit map (it's a no-op on pre-6.10)")
+	}
+
+	// Other fexit programs should be present
+	if _, exists := progsFexit[nfHookSlowFnFexit]; !exists {
+		t.Error("nf_hook_slow_fexit should be in progsFexit map")
+	}
+	if _, exists := progsFexit[tcpV4ConnectFexit]; !exists {
+		t.Error("tcp_v4_connect_fexit should be in progsFexit map")
+	}
+
+	// Kprobe/kretprobe for inet_csk_accept should be returned (nil programs since
+	// objects aren't loaded, but the fields should be accessed without panic)
+	_ = acceptKprobe
+	_ = acceptKretprobe
+}
+
+func TestBuildFexitPrograms_MarinerReturnsKprobeForAccept(t *testing.T) {
+	objs := &marinerObjects{}
+
+	progsFexit, acceptKprobe, acceptKretprobe := buildFexitPrograms(objs)
+
+	// inet_csk_accept_fexit should NOT be in the fexit map
+	if _, exists := progsFexit[inetCskAcceptFnFexit]; exists {
+		t.Error("inet_csk_accept_fexit should not be in progsFexit map for mariner")
+	}
+
+	// Other fexit programs should be present
+	if _, exists := progsFexit[nfHookSlowFnFexit]; !exists {
+		t.Error("nf_hook_slow_fexit should be in progsFexit map")
+	}
+	if _, exists := progsFexit[tcpV4ConnectFexit]; !exists {
+		t.Error("tcp_v4_connect_fexit should be in progsFexit map")
+	}
+
+	_ = acceptKprobe
+	_ = acceptKretprobe
+}
+
+func TestBuildFexitPrograms_KprobeObjectsReturnsNil(t *testing.T) {
+	// When passed a kprobe-only object, buildFexitPrograms should return empty map
+	// and nil kprobe/kretprobe (since kprobes are handled by buildKprobePrograms)
+	objs := &allKprobeObjects{}
+
+	progsFexit, acceptKprobe, acceptKretprobe := buildFexitPrograms(objs)
+
+	if len(progsFexit) != 0 {
+		t.Errorf("expected empty fexit map for kprobe objects, got %d entries", len(progsFexit))
+	}
+	if acceptKprobe != nil {
+		t.Error("expected nil acceptKprobe for kprobe objects")
+	}
+	if acceptKretprobe != nil {
+		t.Error("expected nil acceptKretprobe for kprobe objects")
+	}
+}

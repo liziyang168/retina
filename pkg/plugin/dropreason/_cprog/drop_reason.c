@@ -420,7 +420,12 @@ int BPF_KRETPROBE(inet_csk_accept_ret, struct sock *sk)
     if (sk != NULL)
         return 0;
 
-    int err = (int)*err_ptr;
+    // *err_ptr is the kernel pointer saved by the kprobe (not the error value).
+    // We must use bpf_probe_read_kernel to dereference it and get the actual error.
+    int err = 0;
+    if (bpf_probe_read_kernel(&err, sizeof(err), (void *)(unsigned long)*err_ptr) < 0)
+        return 0;
+
     // err >= 0 means no error; -EAGAIN (-11) is normal for non-blocking accept.
     if (err >= 0 || err == -11)
         return 0;
@@ -464,14 +469,12 @@ int BPF_PROG(inet_csk_accept_fexit)
         }
     } else {
         // Pre-6.10: ctx = [sk, flags, err_ptr, kern, retsk]
-        if ((struct sock *)ctx[4] == NULL) {
-            // ctx[2] is int *err — dereference to check error value.
-            int err = 0;
-            bpf_probe_read_kernel(&err, sizeof(err), (void *)ctx[2]);
-            // EAGAIN (-11) is normal for non-blocking accept; not a real drop.
-            if (err != 0 && err != -11)
-                update_metrics_map_basic(TCP_ACCEPT_BASIC, err, 0);
-        }
+        // On older kernels (e.g. 5.15), the BPF verifier rejects reading ctx[2]
+        // because the BTF encodes the int* parameter as scalar type INT.
+        // Since we cannot read the error code, we skip counting entirely.
+        // This eliminates the false-positive EAGAIN drops (the customer issue)
+        // at the cost of not reporting real accept errors on these kernels.
+        // The kretprobe path (enablePodLevel=true) handles this correctly.
     }
 
     return 0;
