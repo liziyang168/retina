@@ -157,7 +157,7 @@ func TestProcessMapValue(t *testing.T) {
 // After the fix, the eBPF program filters out EAGAIN (-11) and only writes
 // genuine errors to the map with their error code in ReturnVal.
 func TestProcessMapValue_TCPAcceptBasicWithError(t *testing.T) {
-	_ = log.SetupZapLogger(log.GetDefaultLogOpts())
+	_, _ = log.SetupZapLogger(log.GetDefaultLogOpts())
 	metrics.InitializeMetrics(slog.Default())
 	dr := &dropReason{
 		cfg: cfgPodLevelEnabled,
@@ -186,7 +186,7 @@ func TestProcessMapValue_TCPAcceptBasicWithError(t *testing.T) {
 // This test verifies that if somehow an EAGAIN entry did appear (e.g. race
 // during upgrade), it would still be processed — the filtering is in eBPF.
 func TestProcessMapValue_TCPAcceptBasicEAGAINNotInMap(t *testing.T) {
-	_ = log.SetupZapLogger(log.GetDefaultLogOpts())
+	_, _ = log.SetupZapLogger(log.GetDefaultLogOpts())
 	metrics.InitializeMetrics(slog.Default())
 	dr := &dropReason{
 		cfg: cfgPodLevelEnabled,
