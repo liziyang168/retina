@@ -157,7 +157,7 @@ func TestProcessMapValue(t *testing.T) {
 // After the fix, the eBPF program filters out EAGAIN (-11) and only writes
 // genuine errors to the map with their error code in ReturnVal.
 func TestProcessMapValue_TCPAcceptBasicWithError(t *testing.T) {
-	log.SetupZapLogger(log.GetDefaultLogOpts())
+	_ = log.SetupZapLogger(log.GetDefaultLogOpts())
 	metrics.InitializeMetrics(slog.Default())
 	dr := &dropReason{
 		cfg: cfgPodLevelEnabled,
@@ -178,7 +178,7 @@ func TestProcessMapValue_TCPAcceptBasicWithError(t *testing.T) {
 	dropCount := &dto.Metric{}
 	err := metrics.DropPacketsGauge.WithLabelValues(reason, direction).Write(dropCount)
 	require.NoError(t, err)
-	require.Equal(t, float64(5), *dropCount.Gauge.Value)
+	require.Equal(t, float64(5), dropCount.GetGauge().GetValue())
 }
 
 // TestProcessMapValue_TCPAcceptBasicEAGAINNotInMap documents that after the
@@ -186,7 +186,7 @@ func TestProcessMapValue_TCPAcceptBasicWithError(t *testing.T) {
 // This test verifies that if somehow an EAGAIN entry did appear (e.g. race
 // during upgrade), it would still be processed — the filtering is in eBPF.
 func TestProcessMapValue_TCPAcceptBasicEAGAINNotInMap(t *testing.T) {
-	log.SetupZapLogger(log.GetDefaultLogOpts())
+	_ = log.SetupZapLogger(log.GetDefaultLogOpts())
 	metrics.InitializeMetrics(slog.Default())
 	dr := &dropReason{
 		cfg: cfgPodLevelEnabled,
@@ -210,15 +210,15 @@ func TestProcessMapValue_TCPAcceptBasicEAGAINNotInMap(t *testing.T) {
 	dropCount := &dto.Metric{}
 	err := metrics.DropPacketsGauge.WithLabelValues(reason, direction).Write(dropCount)
 	require.NoError(t, err)
-	require.Equal(t, float64(942303), *dropCount.Gauge.Value)
+	require.Equal(t, float64(942303), dropCount.GetGauge().GetValue())
 }
 
 // TestDropMetricKey_GetDirection verifies direction mapping for all drop types.
 func TestDropMetricKey_GetDirection(t *testing.T) {
 	tests := []struct {
-		dropType  uint16
-		wantDir   string
-		wantType  string
+		dropType uint16
+		wantDir  string
+		wantType string
 	}{
 		{dropType: 0, wantDir: "unknown", wantType: "IPTABLE_RULE_DROP"},
 		{dropType: 1, wantDir: "unknown", wantType: "IPTABLE_NAT_DROP"},
@@ -671,6 +671,72 @@ func TestResolveEbpfPayload(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestResolvePayload_FexitObjectsHaveKprobeFields verifies that when resolvePayload
+// returns fexit objects (allFexitObjects or marinerObjects), the structs include
+// the InetCskAccept and InetCskAcceptRet fields needed for the kprobe fallback.
+func TestResolvePayload_FexitObjectsHaveKprobeFields(t *testing.T) {
+	tests := []struct {
+		name      string
+		arch      string
+		kv        semver.Version
+		isMariner bool
+	}{
+		{
+			name:      "allFexitObjects has kprobe fields",
+			arch:      "amd64",
+			kv:        mustVersion("5.15.0"),
+			isMariner: false,
+		},
+		{
+			name:      "marinerObjects has kprobe fields",
+			arch:      "amd64",
+			kv:        mustVersion("6.6.0"),
+			isMariner: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			objs, _, isFexit := resolvePayload(tt.arch, tt.kv, tt.isMariner, false, true)
+			require.True(t, isFexit, "expected fexit mode")
+
+			// buildFexitPrograms should be able to extract kprobe fields without panic
+			progsFexit, acceptKprobe, acceptKretprobe := buildFexitPrograms(objs)
+
+			// fexit map should have other programs but NOT inet_csk_accept_fexit
+			require.NotEmpty(t, progsFexit, "expected non-empty fexit map")
+			_, hasAcceptFexit := progsFexit[inetCskAcceptFnFexit]
+			require.False(t, hasAcceptFexit, "inet_csk_accept_fexit should not be in fexit map")
+			_, hasNfHook := progsFexit[nfHookSlowFnFexit]
+			require.True(t, hasNfHook, "nf_hook_slow_fexit should be in fexit map")
+
+			// kprobe/kretprobe fields should be accessible (nil since we didn't
+			// load the BPF ELF, but the struct fields must exist and be returned)
+			_ = acceptKprobe
+			_ = acceptKretprobe
+		})
+	}
+}
+
+// TestResolvePayload_KprobeObjectsNotAffected verifies that when pod-level mode
+// is used (kprobe-only), the buildFexitPrograms returns empty and nil.
+func TestResolvePayload_KprobeObjectsNotAffected(t *testing.T) {
+	objs, _, isFexit := resolvePayload("amd64", mustVersion("5.15.0"), false, true, true)
+	require.False(t, isFexit, "pod-level should not use fexit")
+
+	progsFexit, acceptKprobe, acceptKretprobe := buildFexitPrograms(objs)
+	require.Empty(t, progsFexit, "kprobe objects should yield empty fexit map")
+	require.Nil(t, acceptKprobe, "kprobe objects should not return acceptKprobe via buildFexitPrograms")
+	require.Nil(t, acceptKretprobe, "kprobe objects should not return acceptKretprobe via buildFexitPrograms")
+
+	// Verify kprobe programs are correctly built for inet_csk_accept
+	progsKprobe, progsKprobeRet := buildKprobePrograms(objs)
+	_, hasAcceptKprobe := progsKprobe[inetCskAcceptFn]
+	require.True(t, hasAcceptKprobe, "kprobe objects should have inet_csk_accept kprobe")
+	_, hasAcceptKretprobe := progsKprobeRet[inetCskAcceptFn]
+	require.True(t, hasAcceptKretprobe, "kprobe objects should have inet_csk_accept kretprobe")
 }
 
 // Helpers.
