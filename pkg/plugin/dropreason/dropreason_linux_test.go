@@ -178,7 +178,7 @@ func TestProcessMapValue_TCPAcceptBasicWithError(t *testing.T) {
 	dropCount := &dto.Metric{}
 	err := metrics.DropPacketsGauge.WithLabelValues(reason, direction).Write(dropCount)
 	require.NoError(t, err)
-	require.Equal(t, float64(5), dropCount.GetGauge().GetValue())
+	require.InDelta(t, float64(5), dropCount.GetGauge().GetValue(), 0)
 }
 
 // TestProcessMapValue_TCPAcceptBasicEAGAINNotInMap documents that after the
@@ -210,7 +210,7 @@ func TestProcessMapValue_TCPAcceptBasicEAGAINNotInMap(t *testing.T) {
 	dropCount := &dto.Metric{}
 	err := metrics.DropPacketsGauge.WithLabelValues(reason, direction).Write(dropCount)
 	require.NoError(t, err)
-	require.Equal(t, float64(942303), dropCount.GetGauge().GetValue())
+	require.InDelta(t, float64(942303), dropCount.GetGauge().GetValue(), 0)
 }
 
 // TestDropMetricKey_GetDirection verifies direction mapping for all drop types.
