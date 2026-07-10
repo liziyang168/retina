@@ -50,6 +50,8 @@ const (
 	nfConntrackConfirmFnFexit = "__nf_conntrack_confirm_fexit"
 )
 
+var errMissingAcceptKprobePrograms = errors.New("missing inet_csk_accept kprobe programs")
+
 func init() {
 	registry.Add(name, New)
 }
@@ -186,27 +188,26 @@ func (dr *dropReason) Init() error {
 			return err
 		}
 		// Attach kprobe/kretprobe for inet_csk_accept alongside fexit programs.
-		// The fexit inet_csk_accept_fexit is a no-op on pre-6.10 kernels (BPF verifier
-		// rejects reading the err pointer from ctx). The kretprobe path correctly reads
-		// the error via bpf_probe_read_kernel and filters EAGAIN.
-		if acceptKprobe != nil {
-			kLink, kErr := link.Kprobe(inetCskAcceptFn, acceptKprobe, nil)
-			if kErr != nil {
-				dr.l.Error("Failed to attach kprobe for inet_csk_accept", zap.Error(kErr))
-				return errors.Wrap(kErr, "failed to attach kprobe for inet_csk_accept")
-			}
-			dr.hooks = append(dr.hooks, kLink)
-			dr.l.Info("Attached kprobe", zap.String("program", inetCskAcceptFn))
+		// inet_csk_accept_fexit is not attached (pre-6.10 verifier limitation), so
+		// accept metrics depend on this kprobe/kretprobe pair being attached.
+		if acceptKprobe == nil || acceptKretprobe == nil {
+			return errMissingAcceptKprobePrograms
 		}
-		if acceptKretprobe != nil {
-			krLink, krErr := link.Kretprobe(inetCskAcceptFn, acceptKretprobe, nil)
-			if krErr != nil {
-				dr.l.Error("Failed to attach kretprobe for inet_csk_accept", zap.Error(krErr))
-				return errors.Wrap(krErr, "failed to attach kretprobe for inet_csk_accept")
-			}
-			dr.hooks = append(dr.hooks, krLink)
-			dr.l.Info("Attached kretprobe", zap.String("program", inetCskAcceptFn))
+
+		kLink, kErr := link.Kprobe(inetCskAcceptFn, acceptKprobe, nil)
+		if kErr != nil {
+			return fmt.Errorf("failed to attach kprobe for %s: %w", inetCskAcceptFn, kErr)
 		}
+		dr.hooks = append(dr.hooks, kLink)
+		dr.l.Info("Attached kprobe", zap.String("program", inetCskAcceptFn))
+
+		krLink, krErr := link.Kretprobe(inetCskAcceptFn, acceptKretprobe, nil)
+		if krErr != nil {
+			kLink.Close()
+			return fmt.Errorf("failed to attach kretprobe for %s: %w", inetCskAcceptFn, krErr)
+		}
+		dr.hooks = append(dr.hooks, krLink)
+		dr.l.Info("Attached kretprobe", zap.String("program", inetCskAcceptFn))
 	} else {
 		err = dr.attachKprobes(progsKprobe, progsKprobeRet)
 	}
