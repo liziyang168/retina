@@ -753,14 +753,15 @@ func TestBuildFexitPrograms_NilAcceptProgramsTriggerError(t *testing.T) {
 	require.Nil(t, acceptKprobe)
 	require.Nil(t, acceptKretprobe)
 
-	// Verify the sentinel error is the one returned
-	require.ErrorIs(t, errMissingAcceptKprobePrograms, errMissingAcceptKprobePrograms)
+	// Verify the sentinel error message
+	require.EqualError(t, errMissingAcceptKprobePrograms, "missing inet_csk_accept kprobe programs")
 }
 
 // TestErrMissingAcceptKprobePrograms_IsSentinel verifies the sentinel error
 // can be checked with errors.Is for programmatic error handling.
 func TestErrMissingAcceptKprobePrograms_IsSentinel(t *testing.T) {
-	require.True(t, errors.Is(errMissingAcceptKprobePrograms, errMissingAcceptKprobePrograms))
+	wrapped := fmt.Errorf("init failed: %w", errMissingAcceptKprobePrograms)
+	require.ErrorIs(t, wrapped, errMissingAcceptKprobePrograms)
 	require.EqualError(t, errMissingAcceptKprobePrograms, "missing inet_csk_accept kprobe programs")
 }
 
