@@ -190,18 +190,33 @@ func (dr *dropReason) Init() error {
 		// Attach kprobe/kretprobe for inet_csk_accept alongside fexit programs.
 		// inet_csk_accept_fexit is not attached (pre-6.10 verifier limitation), so
 		// accept metrics depend on this kprobe/kretprobe pair being attached.
+		cleanupOnErr := func() {
+			for _, hook := range dr.hooks {
+				if hook != nil {
+					_ = hook.Close()
+				}
+			}
+			dr.hooks = nil
+			if dr.reader != nil {
+				_ = dr.reader.Close()
+				dr.reader = nil
+			}
+		}
 		if acceptKprobe == nil || acceptKretprobe == nil {
+			cleanupOnErr()
 			return errMissingAcceptKprobePrograms
 		}
 
 		kLink, kErr := link.Kprobe(inetCskAcceptFn, acceptKprobe, nil)
 		if kErr != nil {
+			cleanupOnErr()
 			return fmt.Errorf("failed to attach kprobe for %s: %w", inetCskAcceptFn, kErr)
 		}
 
 		krLink, krErr := link.Kretprobe(inetCskAcceptFn, acceptKretprobe, nil)
 		if krErr != nil {
-			kLink.Close()
+			_ = kLink.Close()
+			cleanupOnErr()
 			return fmt.Errorf("failed to attach kretprobe for %s: %w", inetCskAcceptFn, krErr)
 		}
 

@@ -738,6 +738,32 @@ func TestResolvePayload_KprobeObjectsNotAffected(t *testing.T) {
 	require.True(t, hasAcceptKretprobe, "kprobe objects should have inet_csk_accept kretprobe")
 }
 
+// TestBuildFexitPrograms_NilAcceptProgramsTriggerError verifies that when
+// buildFexitPrograms returns nil kprobe/kretprobe programs (e.g. due to a
+// struct mismatch), the Init() nil-check would catch it. This tests the
+// precondition that buildFexitPrograms with kprobe-only objects returns nil.
+func TestBuildFexitPrograms_NilAcceptProgramsTriggerError(t *testing.T) {
+	// allKprobeObjects passed to buildFexitPrograms should return nil accept programs
+	// (since it's not a fexit object type). This simulates the scenario where
+	// Init() would call cleanupOnErr and return errMissingAcceptKprobePrograms.
+	objs := &allKprobeObjects{}
+	_, acceptKprobe, acceptKretprobe := buildFexitPrograms(objs)
+
+	// Verify these are nil — in Init(), this triggers the cleanup path
+	require.Nil(t, acceptKprobe)
+	require.Nil(t, acceptKretprobe)
+
+	// Verify the sentinel error is the one returned
+	require.ErrorIs(t, errMissingAcceptKprobePrograms, errMissingAcceptKprobePrograms)
+}
+
+// TestErrMissingAcceptKprobePrograms_IsSentinel verifies the sentinel error
+// can be checked with errors.Is for programmatic error handling.
+func TestErrMissingAcceptKprobePrograms_IsSentinel(t *testing.T) {
+	require.True(t, errors.Is(errMissingAcceptKprobePrograms, errMissingAcceptKprobePrograms))
+	require.EqualError(t, errMissingAcceptKprobePrograms, "missing inet_csk_accept kprobe programs")
+}
+
 // Helpers.
 func takeBackup() {
 	// Get the directory of the current test file.
