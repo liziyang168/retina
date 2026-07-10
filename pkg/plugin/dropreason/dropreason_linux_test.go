@@ -183,8 +183,8 @@ func TestProcessMapValue_TCPAcceptBasicWithError(t *testing.T) {
 
 // TestProcessMapValue_TCPAcceptBasicEAGAINNotInMap documents that after the
 // eBPF fix, EAGAIN errors are filtered in-kernel and never appear in the map.
-// This test verifies that if somehow an EAGAIN entry did appear (e.g. race
-// during upgrade), it would still be processed — the filtering is in eBPF.
+// This test verifies that if an EAGAIN entry did appear (e.g. during upgrade),
+// the Go-side processing would still record it; the filtering happens in eBPF.
 func TestProcessMapValue_TCPAcceptBasicEAGAINNotInMap(t *testing.T) {
 	_, _ = log.SetupZapLogger(log.GetDefaultLogOpts())
 	metrics.InitializeMetrics(slog.Default())
@@ -193,9 +193,8 @@ func TestProcessMapValue_TCPAcceptBasicEAGAINNotInMap(t *testing.T) {
 		l:   log.Logger().Named(name),
 	}
 
-	// Simulate what the OLD buggy code would produce: TCP_ACCEPT_BASIC with
-	// ReturnVal=0 (the old fexit didn't pass any error code).
-	testMetricKey := dropMetricKey{DropType: 3, ReturnVal: 0}
+	// Simulate an unexpected TCP_ACCEPT_BASIC EAGAIN (-11) entry reaching userspace.
+	testMetricKey := dropMetricKey{DropType: 3, ReturnVal: -11}
 	testMetricValues := dropMetricValues{{Count: 942303, Bytes: 0}}
 
 	dr.processMapValue(testMetricKey, testMetricValues)

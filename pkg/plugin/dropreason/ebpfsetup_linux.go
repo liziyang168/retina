@@ -190,11 +190,10 @@ func buildFexitPrograms(objs any) (progsFexit map[string]*ebpf.Program, acceptKp
 
 	switch o := objs.(type) {
 	case *allFexitObjects:
-		// inet_csk_accept_fexit is a no-op on pre-6.10 kernels (verifier rejects
-		// ctx[2] access). We use the kprobe/kretprobe pair instead, which correctly
-		// reads the error value and filters EAGAIN.
-		// On 6.10+ kernels, the fexit handles it via proto_accept_arg (CO-RE).
-		// Including both is safe: the fexit no-op won't conflict with the kretprobe.
+		// inet_csk_accept_fexit is not attached because pre-6.10 kernels' verifier rejects
+		// reading the err pointer from the fexit ctx. We always attach the inet_csk_accept
+		// kprobe/kretprobe pair (even in fexit mode) to report accept errors and filter
+		// out -EAGAIN.
 		acceptKprobe = o.InetCskAccept
 		acceptKretprobe = o.InetCskAcceptRet
 		progsFexit[nfHookSlowFnFexit] = o.NfHookSlowFexit

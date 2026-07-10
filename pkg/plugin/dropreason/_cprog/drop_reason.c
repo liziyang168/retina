@@ -32,6 +32,7 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define ETH_P_8021Q 0x8100
 #define ETH_P_ARP 0x0806
 #define TASK_COMM_LEN 16
+#define EAGAIN_ERRNO 11
 // TODO (Vamsi): Add top 100 dropped connections with LRU map
 
 // Ref: https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/if_packet.h#L26
@@ -426,8 +427,8 @@ int BPF_KRETPROBE(inet_csk_accept_ret, struct sock *sk)
     if (bpf_probe_read_kernel(&err, sizeof(err), (void *)(unsigned long)*err_ptr) < 0)
         return 0;
 
-    // err >= 0 means no error; -EAGAIN (-11) is normal for non-blocking accept.
-    if (err >= 0 || err == -11)
+    // err >= 0 means no error; -EAGAIN is normal for non-blocking accept.
+    if (err >= 0 || err == -EAGAIN_ERRNO)
         return 0;
 
     struct packet p;
@@ -461,10 +462,11 @@ int BPF_PROG(inet_csk_accept_fexit)
         if ((struct sock *)ctx[2] == NULL) {
             // Read err from proto_accept_arg (ctx[1] is the arg pointer).
             int err = 0;
-            bpf_probe_read_kernel(&err, sizeof(err),
-                &((struct proto_accept_arg___new *)ctx[1])->err);
-            // EAGAIN (-11) is normal for non-blocking accept; not a real drop.
-            if (err != 0 && err != -11)
+            if (bpf_probe_read_kernel(&err, sizeof(err),
+                &((struct proto_accept_arg___new *)ctx[1])->err) < 0)
+                return 0;
+            // EAGAIN is normal for non-blocking accept; not a real drop.
+            if (err != 0 && err != -EAGAIN_ERRNO)
                 update_metrics_map_basic(TCP_ACCEPT_BASIC, err, 0);
         }
     } else {
