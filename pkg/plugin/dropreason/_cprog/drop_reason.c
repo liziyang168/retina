@@ -474,7 +474,7 @@ int BPF_PROG(inet_csk_accept_fexit)
         // Since we cannot read the error code, we skip counting entirely.
         // This eliminates the false-positive EAGAIN drops (the customer issue)
         // at the cost of not reporting real accept errors on these kernels.
-        // The kretprobe path (enablePodLevel=true) handles this correctly.
+        // The kprobe/kretprobe path (attached by the Go loader) handles this correctly.
     }
 
     return 0;

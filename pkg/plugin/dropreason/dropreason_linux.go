@@ -193,19 +193,19 @@ func (dr *dropReason) Init() error {
 			kLink, kErr := link.Kprobe(inetCskAcceptFn, acceptKprobe, nil)
 			if kErr != nil {
 				dr.l.Error("Failed to attach kprobe for inet_csk_accept", zap.Error(kErr))
-			} else {
-				dr.hooks = append(dr.hooks, kLink)
-				dr.l.Info("Attached kprobe", zap.String("program", inetCskAcceptFn))
+				return errors.Wrap(kErr, "failed to attach kprobe for inet_csk_accept")
 			}
+			dr.hooks = append(dr.hooks, kLink)
+			dr.l.Info("Attached kprobe", zap.String("program", inetCskAcceptFn))
 		}
 		if acceptKretprobe != nil {
 			krLink, krErr := link.Kretprobe(inetCskAcceptFn, acceptKretprobe, nil)
 			if krErr != nil {
 				dr.l.Error("Failed to attach kretprobe for inet_csk_accept", zap.Error(krErr))
-			} else {
-				dr.hooks = append(dr.hooks, krLink)
-				dr.l.Info("Attached kretprobe", zap.String("program", inetCskAcceptFn))
+				return errors.Wrap(krErr, "failed to attach kretprobe for inet_csk_accept")
 			}
+			dr.hooks = append(dr.hooks, krLink)
+			dr.l.Info("Attached kretprobe", zap.String("program", inetCskAcceptFn))
 		}
 	} else {
 		err = dr.attachKprobes(progsKprobe, progsKprobeRet)
