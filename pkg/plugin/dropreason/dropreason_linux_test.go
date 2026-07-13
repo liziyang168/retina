@@ -738,31 +738,20 @@ func TestResolvePayload_KprobeObjectsNotAffected(t *testing.T) {
 	require.True(t, hasAcceptKretprobe, "kprobe objects should have inet_csk_accept kretprobe")
 }
 
-// TestBuildFexitPrograms_NilAcceptProgramsTriggerError verifies that when
+// TestBuildFexitPrograms_NilAcceptProgramsLogged verifies that when
 // buildFexitPrograms returns nil kprobe/kretprobe programs (e.g. due to a
-// struct mismatch), the Init() nil-check would catch it. This tests the
-// precondition that buildFexitPrograms with kprobe-only objects returns nil.
-func TestBuildFexitPrograms_NilAcceptProgramsTriggerError(t *testing.T) {
+// struct mismatch), Init() would log a warning and continue rather than
+// crashing the plugin. Other drop metrics remain functional.
+func TestBuildFexitPrograms_NilAcceptProgramsLogged(t *testing.T) {
 	// allKprobeObjects passed to buildFexitPrograms should return nil accept programs
-	// (since it's not a fexit object type). This simulates the scenario where
-	// Init() would call cleanupOnErr and return errMissingAcceptKprobePrograms.
+	// (since it's not a fexit object type).
 	objs := &allKprobeObjects{}
 	_, acceptKprobe, acceptKretprobe := buildFexitPrograms(objs)
 
-	// Verify these are nil — in Init(), this triggers the cleanup path
+	// Verify these are nil — in Init(), this triggers a warning log
+	// but does NOT cause the plugin to fail.
 	require.Nil(t, acceptKprobe)
 	require.Nil(t, acceptKretprobe)
-
-	// Verify the sentinel error message
-	require.EqualError(t, errMissingAcceptKprobePrograms, "missing inet_csk_accept kprobe programs")
-}
-
-// TestErrMissingAcceptKprobePrograms_IsSentinel verifies the sentinel error
-// can be checked with errors.Is for programmatic error handling.
-func TestErrMissingAcceptKprobePrograms_IsSentinel(t *testing.T) {
-	wrapped := fmt.Errorf("init failed: %w", errMissingAcceptKprobePrograms)
-	require.ErrorIs(t, wrapped, errMissingAcceptKprobePrograms)
-	require.EqualError(t, errMissingAcceptKprobePrograms, "missing inet_csk_accept kprobe programs")
 }
 
 // Helpers.

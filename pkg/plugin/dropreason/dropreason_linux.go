@@ -50,8 +50,6 @@ const (
 	nfConntrackConfirmFnFexit = "__nf_conntrack_confirm_fexit"
 )
 
-var errMissingAcceptKprobePrograms = errors.New("missing inet_csk_accept kprobe programs")
-
 func init() {
 	registry.Add(name, New)
 }
@@ -190,39 +188,30 @@ func (dr *dropReason) Init() error {
 		// Attach kprobe/kretprobe for inet_csk_accept alongside fexit programs.
 		// inet_csk_accept_fexit is not attached (pre-6.10 verifier limitation), so
 		// accept metrics depend on this kprobe/kretprobe pair being attached.
-		cleanupOnErr := func() {
-			for _, hook := range dr.hooks {
-				if hook != nil {
-					_ = hook.Close()
+		// If attachment fails, log a warning and continue — other drop metrics
+		// (IPTABLE_RULE_DROP, TCP_CONNECT_BASIC, etc.) remain functional.
+		if acceptKprobe == nil || acceptKretprobe == nil {
+			dr.l.Warn("inet_csk_accept kprobe programs not found in BPF object; TCP_ACCEPT_BASIC metrics will be unavailable")
+		} else {
+			kLink, kErr := link.Kprobe(inetCskAcceptFn, acceptKprobe, nil)
+			if kErr != nil {
+				dr.l.Error("Failed to attach kprobe for inet_csk_accept; TCP_ACCEPT_BASIC metrics will be unavailable",
+					zap.Error(kErr))
+			} else {
+				krLink, krErr := link.Kretprobe(inetCskAcceptFn, acceptKretprobe, nil)
+				if krErr != nil {
+					_ = kLink.Close()
+					dr.l.Error("Failed to attach kretprobe for inet_csk_accept; TCP_ACCEPT_BASIC metrics will be unavailable",
+						zap.Error(krErr))
+				} else {
+					dr.hooks = append(dr.hooks, kLink, krLink)
+					dr.l.Info("Attached kprobe", zap.String("program", inetCskAcceptFn))
+					dr.l.Info("Attached kretprobe", zap.String("program", inetCskAcceptFn))
 				}
 			}
-			dr.hooks = nil
-			if dr.reader != nil {
-				_ = dr.reader.Close()
-				dr.reader = nil
-			}
 		}
-		if acceptKprobe == nil || acceptKretprobe == nil {
-			cleanupOnErr()
-			return errMissingAcceptKprobePrograms
-		}
-
-		kLink, kErr := link.Kprobe(inetCskAcceptFn, acceptKprobe, nil)
-		if kErr != nil {
-			cleanupOnErr()
-			return fmt.Errorf("failed to attach kprobe for %s: %w", inetCskAcceptFn, kErr)
-		}
-
-		krLink, krErr := link.Kretprobe(inetCskAcceptFn, acceptKretprobe, nil)
-		if krErr != nil {
-			_ = kLink.Close()
-			cleanupOnErr()
-			return fmt.Errorf("failed to attach kretprobe for %s: %w", inetCskAcceptFn, krErr)
-		}
-
-		dr.hooks = append(dr.hooks, kLink, krLink)
-		dr.l.Info("Attached kprobe", zap.String("program", inetCskAcceptFn))
-		dr.l.Info("Attached kretprobe", zap.String("program", inetCskAcceptFn))
+		dr.l.Warn("inet_csk_accept_fexit is not attached (pre-6.10 BPF verifier limitation); " +
+			"using kprobe/kretprobe fallback for TCP accept error metrics")
 	} else {
 		err = dr.attachKprobes(progsKprobe, progsKprobeRet)
 	}
